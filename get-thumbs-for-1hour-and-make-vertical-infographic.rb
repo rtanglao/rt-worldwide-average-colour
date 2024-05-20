@@ -1,0 +1,177 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require 'rubygems'
+require 'bundler/setup'
+require 'typhoeus'
+require 'amazing_print'
+require 'time'
+require 'date'
+require 'logger'
+require 'io/console'
+require 'parseconfig'
+require 'fileutils'
+require 'pry'
+require 'pry-byebug'
+require 'tzinfo'
+require 'down/http'
+require 'json'
+require 'rmagick'
+
+include Magick
+
+def get_flickr_response(url, params, _logger)
+  url = "https://api.flickr.com/#{url}"
+  try_count = 0
+  begin
+    result = Typhoeus::Request.get(
+      url,
+      params: params
+    )
+    x = JSON.parse(result.body)
+  rescue JSON::ParserError
+    try_count += 1
+    if try_count < 4
+      logger.debug "JSON::ParserError exception, retry:#{try_count}"
+      sleep(10)
+      retry
+    else
+      logger.debug 'JSON::ParserError exception, retrying FAILED'
+      x = nil
+    end
+  end
+  x
+end
+
+logger = Logger.new($stderr)
+logger.level = Logger::DEBUG
+
+if ARGV.length < 4
+  puts "usage: #{$PROGRAM_NAME} yyyy mm dd hh"
+  exit
+end
+
+YYYY = ARGV[0]
+MM = ARGV[1]
+DD = ARGV[2]
+HH = ARGV[3]
+
+flickr_config = ParseConfig.new('flickr.conf').params
+api_key = flickr_config['api_key']
+
+BEGIN_TIME = Time.parse "#{YYYY} #{MM}/#{DD} #{HH}:00 -0800"
+END_TIME = Time.parse "#{YYYY} #{MM}/#{DD} #{HH}:59:59 -0800"
+logger.debug "BEGIN_TIME: #{BEGIN_TIME.ai}"
+logger.debug "END_TIME: #{END_TIME.ai}"
+
+begin_mysql_time = Time.at(BEGIN_TIME).strftime('%Y-%m-%d %H:%M:%S')
+logger.debug "BEGIN mysql TIME: #{begin_mysql_time.ai}"
+end_mysql_time = Time.at(END_TIME).strftime('%Y-%m-%d %H:%M:%S')
+logger.debug "END mysql TIME: #{end_mysql_time.ai}"
+
+extras_str = 'description, license, date_upload, date_taken, owner_name, icon_server,'\
+             'original_format, last_update, geo, tags, machine_tags, o_dims, views,'\
+             'media, path_alias, url_sq, url_t, url_s, url_m, url_z, url_l, url_o,'\
+             'url_c, url_q, url_n, url_k, url_h, url_b'
+flickr_url = 'services/rest/'
+logger.debug "begin_mysql_time:#{begin_mysql_time}"
+
+NUM_PHOTOS_TO_DOWNLOAD = 500
+
+url_params =
+  {
+    method: 'flickr.photos.search',
+    media: 'photos', # Just photos no videos
+    content_type: 1, # Just photos, no videos, screenshots, etc
+    api_key: api_key,
+    format: 'json',
+    nojsoncallback: '1',
+    extras: extras_str,
+    sort: 'date-taken-asc',
+    per_page: NUM_PHOTOS_TO_DOWNLOAD,
+    page: 1,
+    # Looks like unix time support is broken so use mysql time
+    min_taken_date: begin_mysql_time,
+    max_taken_date: end_mysql_time
+  }
+photos_on_this_page = get_flickr_response(flickr_url, url_params, logger)
+logger.debug "STATUS from flickr API:#{photos_on_this_page['stat']} num_pages:\
+  #{photos_on_this_page['photos']['pages'].to_i}"
+binding.pry
+PARAMS_TO_KEEP = %w[id dateupload url_l height_l width_l]
+photos = []
+photos_on_this_page['photos']['photo'].each do |photo|
+  # logger.debug "photo from API: #{photo.ai}"
+  dateupload = Time.at(photo['dateupload'].to_i)
+  logger.debug "dateupload:#{dateupload}"
+  photo['id'] = photo['id'].to_i
+  photo['dateupload'] = photo['dateupload'].to_i
+  next if !photo.has_key?('height_l') || photo['height_l'] < 640 # Skip all photos that are less than 640px high.
+
+  photo_without_unnecessary_stuff = photo.slice(*PARAMS_TO_KEEP)
+  logger.debug "photo without unnecessary stuff: #{photo_without_unnecessary_stuff.ai}"
+  photos.push(photo_without_unnecessary_stuff)
+end
+photos.sort! { |a, b| a['dateupload'] <=> b['dateupload'] }
+# Get last photo and figure out the date for the Pacific timezone
+# and skip prior dates (if there are any)
+last = photos[-1]
+tz = TZInfo::Timezone.get('America/Vancouver')
+localtime = tz.to_local(Time.at(last['dateupload']))
+localyyyy = localtime.strftime('%Y').to_i
+localmm = localtime.strftime('%m').to_i
+localdd = localtime.strftime('%d').to_i
+startdate = tz.local_time(localyyyy, localmm, localdd, 0, 0).to_i
+photos.reject! { |p| p['dateupload'] < startdate }
+exit if photos.length.zero?
+BARCODE_SLICE = '/tmp/resized.png'
+HEIGHT = 640
+WIDTH = 1
+# Create barcode/yyyy/mm/dd directory if it doesn't exist
+DIRECTORY = format(
+  'barcode/%<yyyy>4.4d/%<mm>2.2d/%<dd>2.2d',
+  yyyy: localyyyy, mm: localmm, dd: localdd
+)
+ID_FILEPATH = "#{DIRECTORY}/processed-ids.txt"
+BARCODE_FILEPATH = 'barcode/barcode.png'
+DAILY_BARCODE_FILEPATH = format(
+  '%<dir>s/%<yyyy>4.4d-%<mm>2.2d-%<dd>2.2d.png',
+  dir: DIRECTORY, yyyy: localyyyy, mm: localmm, dd: localdd
+)
+FileUtils.mkdir_p DIRECTORY
+processed_ids = []
+processed_ids = IO.readlines(ID_FILEPATH).map(&:to_i) if File.exist?(ID_FILEPATH)
+check_daily_file_exists = true
+photos.each do |photo|
+  id = photo['id']
+  next if processed_ids.include?(id)
+
+  # Download the thumbnail to /tmp
+  logger.debug "DOWNLOADING #{id}"
+  # 640 height files shouldn't be more than 1 MB!!!
+  retry_count = 0
+  begin
+    tempfile = Down::Http.download(photo['url_l'], max_size: 1 * 1024 * 1024)
+  rescue Down::ClientError, Down::NotFound => e
+    retry_count += 1
+    retry if retry_count < 3
+    next # raise(e) ie. skip the photo if we can't download it
+  end
+  thumb = Image.read(tempfile.path).first
+  resized = thumb.resize(WIDTH, HEIGHT)
+  resized.write(BARCODE_SLICE)
+  if check_daily_file_exists && !File.exist?(DAILY_BARCODE_FILEPATH)
+    FileUtils.cp(BARCODE_SLICE, DAILY_BARCODE_FILEPATH)
+    check_daily_file_exists = false
+  else
+    image_list = Magick::ImageList.new(DAILY_BARCODE_FILEPATH, BARCODE_SLICE)
+    montaged_images = image_list.montage { |image| image.tile = '2x1', image.geometry = '+0+0' }
+    montaged_images.write(DAILY_BARCODE_FILEPATH)
+  end
+  File.delete(tempfile.path)
+  # After the thumbnail is downloaded,  add the id to the file and to the array
+  # so we don't download it again!
+  File.open(ID_FILEPATH, 'a') { |f| f.write("#{id}\n") }
+  processed_ids.push(id)
+  FileUtils.cp(DAILY_BARCODE_FILEPATH, BARCODE_FILEPATH)
+end
