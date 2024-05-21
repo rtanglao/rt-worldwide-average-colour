@@ -54,7 +54,7 @@ DD = ARGV[2]
 HH = ARGV[3]
 # THUMBS/2024-05-20
 THUMBS_PATH = "THUMBS/#{format('%4.4d', YYYY.to_i)}-#{format('%2.2d', MM.to_i)}-#{format('%2.2d', DD.to_i)}"
-METADATA_PATH = 'METADATA'
+METADATA_PATH = "METADATA/#{format('%4.4d', YYYY.to_i)}-#{format('%2.2d', MM.to_i)}-#{format('%2.2d', DD.to_i)}"
 FileUtils.mkdir_p METADATA_PATH
 # METADATA/2024-01-01-00-flickr-metadata.csv
 METADATA_FILENAME = "#{METADATA_PATH}/#{format('%4.4d', YYYY.to_i)}-#{format('%2.2d', MM.to_i)}-"\
