@@ -58,7 +58,7 @@ METADATA_PATH = 'METADATA'
 FileUtils.mkdir_p METADATA_PATH
 # METADATA/2024-01-01-00-flickr-metadata.csv
 METADATA_FILENAME = "#{METADATA_PATH}/#{format('%4.4d', YYYY.to_i)}-#{format('%2.2d', MM.to_i)}-"\
-"#{format('%2.2d', MM.to_i)}-flickr-metadata.csv"
+"#{format('%2.2d', DD.to_i)}-#{format('%2.2d', HH.to_i)}-flickr-metadata.csv"
 flickr_config = ParseConfig.new('flickr.conf').params
 
 api_key = flickr_config['api_key']
