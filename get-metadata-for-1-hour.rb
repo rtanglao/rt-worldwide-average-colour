@@ -17,7 +17,7 @@ require 'tzinfo'
 require 'json'
 require 'csv'
 
-def get_flickr_response(url, params, _logger)
+def get_flickr_response(url, params, logger)
   url = "https://api.flickr.com/#{url}"
   try_count = 0
   begin
