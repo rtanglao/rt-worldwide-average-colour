@@ -87,6 +87,7 @@ photos_to_retrieve = NUM_PHOTOS_TO_DOWNLOAD
 first_page = true
 csv_array = []
 photo_index = 0
+PHOTO_INDEX_OFFSET = HH.to_i * 1_000_000
 while photos_to_retrieve.positive?
   url_params =
     {
@@ -147,10 +148,10 @@ while photos_to_retrieve.positive?
     logger.debug "photo.ai: #{photo.ai}"
     photo['description_content'] = photo['description']['_content']
     photo['thumbs_path'] = THUMBS_PATH
-    # filename format:     # 000001-2024-01-01-01-owner-id-title-75x75
-    thumb_filename = "#{format('%6.6d', photo_index)}-"\
-    "#{format('%4.4d', YYYY.to_i)}-#{format('%2.2d', MM.to_i)}-"\
+    # filename format:     # 2024-01-01-01-01000001-owner-id-title-75x75,jpg
+    thumb_filename = "#{format('%4.4d', YYYY.to_i)}-#{format('%2.2d', MM.to_i)}-"\
     "#{format('%2.2d', DD.to_i)}-#{format('%2.2d', HH.to_i)}-"\
+    "#{format('%8.8d', photo_index + PHOTO_INDEX_OFFSET)}-"\
     "#{photo['owner'].gsub('@', '_')}"\
     "-#{photo['id']}-#{photo['title'].gsub(/[^\w.]/, '_')[0..31]}-75x75.jpg"
     logger.debug "thumb_filename:#{thumb_filename}"
