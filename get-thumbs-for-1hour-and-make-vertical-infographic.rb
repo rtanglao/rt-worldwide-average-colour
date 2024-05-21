@@ -14,11 +14,8 @@ require 'fileutils'
 require 'pry'
 require 'pry-byebug'
 require 'tzinfo'
-require 'down/http'
 require 'json'
-require 'rmagick'
-
-include Magick
+require 'csv'
 
 def get_flickr_response(url, params, _logger)
   url = "https://api.flickr.com/#{url}"
@@ -57,6 +54,11 @@ DD = ARGV[2]
 HH = ARGV[3]
 # THUMBS/2024-05-20
 THUMBS_PATH = "THUMBS/#{format('%4.4d', YYYY.to_i)}-#{format('%2.2d', MM.to_i)}-#{format('%2.2d', DD.to_i)}"
+METADATA_PATH = 'METADATA'
+FileUtils.mkdir_p METADATA_PATH
+# METADATA/2024-01-01-00-flickr-metadata.csv
+METADATA_FILENAME = "#{METADATA_PATH}/#{format('%4.4d', YYYY.to_i)}-#{format('%2.2d', MM.to_i)}-"\
+"#{format('%2.2d', MM.to_i)}-flickr-metadata.csv"
 flickr_config = ParseConfig.new('flickr.conf').params
 
 api_key = flickr_config['api_key']
@@ -157,69 +159,9 @@ while photos_to_retrieve.positive?
     csv_array.push(photo_without_nested_stuff)
     # logger.debug photo.except("description").ai
     logger.debug "photo_without_nested_stuff #{photo_without_nested_stuff.ai}"
-    binding.pry
   end
 end
-photos.sort! { |a, b| a['dateupload'] <=> b['dateupload'] }
-# Get last photo and figure out the date for the Pacific timezone
-# and skip prior dates (if there are any)
-last = photos[-1]
-tz = TZInfo::Timezone.get('America/Vancouver')
-localtime = tz.to_local(Time.at(last['dateupload']))
-localyyyy = localtime.strftime('%Y').to_i
-localmm = localtime.strftime('%m').to_i
-localdd = localtime.strftime('%d').to_i
-startdate = tz.local_time(localyyyy, localmm, localdd, 0, 0).to_i
-photos.reject! { |p| p['dateupload'] < startdate }
-exit if photos.length.empty?
-BARCODE_SLICE = '/tmp/resized.png'
-HEIGHT = 640
-WIDTH = 1
-# Create barcode/yyyy/mm/dd directory if it doesn't exist
-DIRECTORY = format(
-  'barcode/%<yyyy>4.4d/%<mm>2.2d/%<dd>2.2d',
-  yyyy: localyyyy, mm: localmm, dd: localdd
-)
-ID_FILEPATH = "#{DIRECTORY}/processed-ids.txt"
-BARCODE_FILEPATH = 'barcode/barcode.png'
-DAILY_BARCODE_FILEPATH = format(
-  '%<dir>s/%<yyyy>4.4d-%<mm>2.2d-%<dd>2.2d.png',
-  dir: DIRECTORY, yyyy: localyyyy, mm: localmm, dd: localdd
-)
-FileUtils.mkdir_p DIRECTORY
-processed_ids = []
-processed_ids = IO.readlines(ID_FILEPATH).map(&:to_i) if File.exist?(ID_FILEPATH)
-check_daily_file_exists = true
-photos.each do |photo|
-  id = photo['id']
-  next if processed_ids.include?(id)
-
-  # Download the thumbnail to /tmp
-  logger.debug "DOWNLOADING #{id}"
-  # 640 height files shouldn't be more than 1 MB!!!
-  retry_count = 0
-  begin
-    tempfile = Down::Http.download(photo['url_l'], max_size: 1 * 1024 * 1024)
-  rescue Down::ClientError, Down::NotFound => e
-    retry_count += 1
-    retry if retry_count < 3
-    next # raise(e) ie. skip the photo if we can't download it
-  end
-  thumb = Image.read(tempfile.path).first
-  resized = thumb.resize(WIDTH, HEIGHT)
-  resized.write(BARCODE_SLICE)
-  if check_daily_file_exists && !File.exist?(DAILY_BARCODE_FILEPATH)
-    FileUtils.cp(BARCODE_SLICE, DAILY_BARCODE_FILEPATH)
-    check_daily_file_exists = false
-  else
-    image_list = Magick::ImageList.new(DAILY_BARCODE_FILEPATH, BARCODE_SLICE)
-    montaged_images = image_list.montage { |image| image.tile = '2x1', image.geometry = '+0+0' }
-    montaged_images.write(DAILY_BARCODE_FILEPATH)
-  end
-  File.delete(tempfile.path)
-  # After the thumbnail is downloaded,  add the id to the file and to the array
-  # so we don't download it again!
-  File.open(ID_FILEPATH, 'a') { |f| f.write("#{id}\n") }
-  processed_ids.push(id)
-  FileUtils.cp(DAILY_BARCODE_FILEPATH, BARCODE_FILEPATH)
+headers = csv_array[0].keys
+CSV.open(METADATA_FILENAME, 'w', write_headers: true, headers: headers) do |csv_object|
+  csv_array.each { |row_array| csv_object << row_array }
 end
