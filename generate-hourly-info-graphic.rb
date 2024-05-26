@@ -37,6 +37,11 @@ end
 metadata_filename = ARGV[0]
 relevant_metadata = []
 CSV.foreach(metadata_filename, headers: true) do |row|
+  id = row['id'].to_i
+  if relevant_metadata.any? { |m| m[:id] == id }
+    logger.debug "FOUND duplicate of id: #{id} SKIPPING"
+    next
+end
   relevant_metadata.push({ id: row['id'].to_i,
                            url_sq: row['url_sq'],
                            thumb_filename: row['thumb_filename'] })
