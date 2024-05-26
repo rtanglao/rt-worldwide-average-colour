@@ -1,0 +1,65 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require 'rubygems'
+require 'bundler/setup'
+require 'amazing_print'
+require 'json'
+require 'time'
+require 'date'
+require 'csv'
+require 'logger'
+require 'rmagick'
+require 'pry'
+require 'mini_magick'
+require 'pry'
+require 'pry-byebug'
+require 'down/http'
+logger = Logger.new($stderr)
+logger.level = Logger::DEBUG
+
+VERTICAL = true
+HORIZONTAL = false
+
+def append_image(image_to_be_appended, image, vertical_or_horizontal)
+  image_list = Magick::ImageList.new(image_to_be_appended, image)
+  appended_images = image_list.append(vertical_or_horizontal)
+  appended_images.write(image)
+end
+
+if ARGV.empty?
+  puts "usage: #{$PROGRAM_NAME} <hourly_metadatafilename>"
+  exit
+end
+
+metadata_filename = ARGV[0]
+relevant_metadata = []
+CSV.foreach(metadata_filename, headers: true) do |row|
+  relevant_metadata.push({ id: row['id'].to_i,
+                           url_sq: row['url_sq'],
+                           thumb_filename: row['thumb_filename'] })
+end
+length = relevant_metadata.length
+logger.debug "length: #{length}"
+LARGEST_NUMBER_OF_HOURLY_PHOTOS = 209_999 # Magic number based on the fact that 215,000 photos were uploaded in 1 hour on Christmas Day 2023
+MAX_SAMPLE_SIZE = 4000
+sample_size = if length > LARGEST_NUMBER_OF_HOURLY_PHOTOS
+                MAX_SAMPLE_SIZE
+              else
+                (length / LARGEST_NUMBER_OF_HOURLY_PHOTOS.to_f * MAX_SAMPLE_SIZE).round
+              end
+logger.debug "sample_size: #{sample_size}"
+sampled_relevant_metadata = relevant_metadata.sample(sample_size)
+sampled_relevant_metadata.sort_by! { |h| h[:id] }
+# do something with my_array[0] or my_array.first
+tempfile = Down::Http.download(sampled_relevant_metadata[0][:url_sq], max_size: 1 * 64 * 1024) # shouldn't be more than 64K
+logger.debug "DOWNLOADING #{sampled_relevant_metadata[0][:id]}"
+binding.pry
+sampled_relevant_metadata.drop(1).each do |m| 
+  # do the same general thing to all elements except the first 
+end
+
+image = MiniMagick::Image.open(photo_without_dot_slash)
+image.resize '1x1'
+image.format 'png'
+image.write filename
