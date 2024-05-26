@@ -38,13 +38,15 @@ metadata_filename = ARGV[0]
 relevant_metadata = []
 CSV.foreach(metadata_filename, headers: true) do |row|
   id = row['id'].to_i
-  if relevant_metadata.any? { |m| m[:id] == id }
-    logger.debug "FOUND duplicate of id: #{id} SKIPPING"
-    next
-end
-  relevant_metadata.push({ id: row['id'].to_i,
-                           url_sq: row['url_sq'],
+  url_sq = row['url_sq']
+  #   if relevant_metadata.any? { |m| m[:url_sq] == url_sq }
+  #    logger.debug "FOUND duplicate of id: #{id} SKIPPING URL: #{url_sq}"
+  #    next
+  #  end
+  relevant_metadata.push({ id: id,
+                           url_sq: url_sq,
                            thumb_filename: row['thumb_filename'] })
+  logger.debug "last: #{relevant_metadata.last}"
 end
 length = relevant_metadata.length
 logger.debug "length: #{length}"
@@ -58,15 +60,22 @@ sample_size = if length > LARGEST_NUMBER_OF_HOURLY_PHOTOS
 logger.debug "sample_size: #{sample_size}"
 sampled_relevant_metadata = relevant_metadata.sample(sample_size)
 sorted_sampled_relevant_metadata = sampled_relevant_metadata.sort { |a, b| a[:id] <=> b[:id] }
-
+binding.pry
 output_filename = "#{File.basename(metadata_filename)}".ext('png')
 output_filename = output_filename.gsub('metadata', 'average-colour')
 logger.debug "filename: #{output_filename}"
 AVERAGE_COLOUR_FILENAME = 'average_colour.png'
 binding.pry
-sorted_sampled_relevant_metadata.each.with_index do |m, i|
+sampled_relevant_metadata.each.with_index do |m, i|
   logger.debug "DOWNLOADING id: #{m[:id]}, url: #{m[:url_sq]}"
-  tempfile = Down::Http.download(m[:url_sq], max_size: 1 * 64 * 1024) # shouldn't be more than 64K
+  skip = false
+  begin
+    tempfile = Down::Http.download(m[:url_sq], max_size: 1 * 64 * 1024) # shouldn't be more than 64K
+  rescue Down::ClientError
+    skip = true
+  end
+  next if skip
+
   image = MiniMagick::Image.open(tempfile.path)
   image.resize '1x1'
   image.format 'png'
