@@ -15,6 +15,8 @@ require 'mini_magick'
 require 'pry'
 require 'pry-byebug'
 require 'down/http'
+require 'rake'
+
 logger = Logger.new($stderr)
 logger.level = Logger::DEBUG
 
@@ -50,16 +52,24 @@ sample_size = if length > LARGEST_NUMBER_OF_HOURLY_PHOTOS
               end
 logger.debug "sample_size: #{sample_size}"
 sampled_relevant_metadata = relevant_metadata.sample(sample_size)
-sampled_relevant_metadata.sort_by! { |h| h[:id] }
-# do something with my_array[0] or my_array.first
-tempfile = Down::Http.download(sampled_relevant_metadata[0][:url_sq], max_size: 1 * 64 * 1024) # shouldn't be more than 64K
-logger.debug "DOWNLOADING #{sampled_relevant_metadata[0][:id]}"
-binding.pry
-sampled_relevant_metadata.drop(1).each do |m| 
-  # do the same general thing to all elements except the first 
-end
+sorted_sampled_relevant_metadata = sampled_relevant_metadata.sort { |a, b| a[:id] <=> b[:id] }
 
-image = MiniMagick::Image.open(photo_without_dot_slash)
-image.resize '1x1'
-image.format 'png'
-image.write filename
+output_filename = "#{File.basename(metadata_filename)}".ext('png')
+output_filename = output_filename.gsub('metadata', 'average-colour')
+logger.debug "filename: #{output_filename}"
+AVERAGE_COLOUR_FILENAME = 'average_colour.png'
+binding.pry
+sorted_sampled_relevant_metadata.each.with_index do |m, i|
+  logger.debug "DOWNLOADING id: #{m[:id]}, url: #{m[:url_sq]}"
+  tempfile = Down::Http.download(m[:url_sq], max_size: 1 * 64 * 1024) # shouldn't be more than 64K
+  image = MiniMagick::Image.open(tempfile.path)
+  image.resize '1x1'
+  image.format 'png'
+  image.write AVERAGE_COLOUR_FILENAME
+  if i.zero?
+    FileUtils.mv(AVERAGE_COLOUR_FILENAME, output_filename)
+  else
+    append_image(AVERAGE_COLOUR_FILENAME, output_filename, VERTICAL)
+  end
+  File.delete(tempfile.path)
+end
