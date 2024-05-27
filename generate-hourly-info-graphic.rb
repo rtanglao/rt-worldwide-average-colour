@@ -89,3 +89,4 @@ sampled_relevant_metadata.each.with_index do |m, i|
     sleep(2) # sleep 2 seconds every 100 photos
   end
 end
+File.delete(AVERAGE_COLOUR_FILENAME)
