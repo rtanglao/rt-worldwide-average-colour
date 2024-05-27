@@ -16,6 +16,7 @@ require 'pry'
 require 'pry-byebug'
 require 'down/http'
 require 'rake'
+require 'securerandom'
 
 logger = Logger.new($stderr)
 logger.level = Logger::DEBUG
@@ -59,13 +60,11 @@ sample_size = if length > LARGEST_NUMBER_OF_HOURLY_PHOTOS
               end
 logger.debug "sample_size: #{sample_size}"
 sampled_relevant_metadata = relevant_metadata.sample(sample_size)
-sorted_sampled_relevant_metadata = sampled_relevant_metadata.sort { |a, b| a[:id] <=> b[:id] }
-binding.pry
 output_filename = "#{File.basename(metadata_filename)}".ext('png')
 output_filename = output_filename.gsub('metadata', 'average-colour')
-logger.debug "filename: #{output_filename}"
-AVERAGE_COLOUR_FILENAME = 'average_colour.png'
-binding.pry
+logger.debug "output_filename: #{output_filename}"
+AVERAGE_COLOUR_FILENAME = "average_colour-#{SecureRandom.hex}.png"
+logger.debug "average colour filename: #{AVERAGE_COLOUR_FILENAME}"
 sampled_relevant_metadata.each.with_index do |m, i|
   logger.debug "DOWNLOADING id: #{m[:id]}, url: #{m[:url_sq]}"
   skip = false
@@ -86,4 +85,7 @@ sampled_relevant_metadata.each.with_index do |m, i|
     append_image(AVERAGE_COLOUR_FILENAME, output_filename, VERTICAL)
   end
   File.delete(tempfile.path)
+  if (i % 100).zero? 
+    sleep(2) # sleep 2 seconds every 100 photos
+  end
 end
